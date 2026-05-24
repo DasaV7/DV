@@ -2,6 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import plotly.graph_objects as go
 from datetime import datetime
 
 import appdirs as ad
@@ -105,13 +106,12 @@ with tab2:
         st.cache_data.clear()
         st.rerun()
 
-    # Fixed cache function - only return serializable objects
     @st.cache_data(ttl=180)
     def get_single_data(symbol, days):
         stock = yf.Ticker(symbol)
         hist = stock.history(period=f"{days}d")
         options_dates = stock.options
-        return hist, options_dates   # Removed full stock object
+        return hist, options_dates
 
     hist, options_dates = get_single_data(single_ticker, days)
 
@@ -141,7 +141,6 @@ with tab2:
     iv = 35.0
     try:
         if options_dates:
-            # Fresh Ticker object for options
             temp_stock = yf.Ticker(single_ticker)
             chain = temp_stock.option_chain(options_dates[0])
             puts = chain.puts
@@ -151,10 +150,10 @@ with tab2:
     except:
         pass
 
-    # Display
+    # Layout
     col1, col2 = st.columns([1.1, 1])
     with col1:
-        st.subheader("1. EMA Cloud Green (9>21)")
+        st.subheader("1. EMA Cloud Green (9 > 21)")
         st.success("✅ PASS") if is_green_cloud else st.error("❌ FAIL")
         
         fig1 = go.Figure()
