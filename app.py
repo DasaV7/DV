@@ -19,7 +19,7 @@ def get_weekly_tickers():
 weekly_tickers = get_weekly_tickers()
 
 # Sidebar
-st.sidebar.header("Single Ticker Mode")
+st.sidebar.header("Single Ticker Deep Dive")
 single_ticker = st.sidebar.text_input("Ticker Symbol", value="SPY", max_chars=10).upper().strip()
 days = st.sidebar.slider("History (days)", 30, 730, 365)
 
@@ -40,18 +40,15 @@ with tab1:
     
     all_tickers = list(dict.fromkeys(weekly_tickers + user_tickers))
 
-    # Create grid of cards
     cols = st.columns(3)
-    
     for idx, ticker in enumerate(all_tickers):
-        col = cols[idx % 3]
-        with col:
+        with cols[idx % 3]:
             with st.container(border=True):
                 try:
                     stock = yf.Ticker(ticker)
                     hist = stock.history(period="60d")
                     if hist.empty:
-                        st.error(f"⚠️ No data for {ticker}")
+                        st.error(f"No data for {ticker}")
                         continue
 
                     close = hist['Close']
@@ -60,21 +57,19 @@ with tab1:
                     ema9 = close.ewm(span=9, adjust=False).mean()
                     ema21 = close.ewm(span=21, adjust=False).mean()
 
-                    # RSI
                     delta = close.diff()
                     gain = delta.where(delta > 0, 0).rolling(14).mean()
                     loss = -delta.where(delta < 0, 0).rolling(14).mean()
                     rsi_val = round(100 - (100 / (1 + gain / loss)).iloc[-1], 1)
 
-                    # IV
                     iv = 35.0
                     try:
                         if stock.options:
                             chain = stock.option_chain(stock.options[0])
                             puts = chain.puts
                             if not puts.empty:
-                                atm = (puts['strike'] - price).abs().idxmin()
-                                iv = round(float(puts.loc[atm, 'impliedVolatility']) * 100, 1)
+                                atm_idx = (puts['strike'] - price).abs().idxmin()
+                                iv = round(float(puts.loc[atm_idx, 'impliedVolatility']) * 100, 1)
                     except:
                         pass
 
@@ -87,44 +82,43 @@ with tab1:
 
                     st.subheader(f"{color} {ticker} — ${price}")
                     st.metric("Score", f"{score}/4")
+                    st.progress(score / 4)
 
-                    # Conditions as text (more stable than success/error inside loop)
                     st.write("**Conditions:**")
                     st.write("✅ EMA Cloud Green" if green_cloud else "❌ EMA Cloud")
                     st.write("✅ RSI < 50" if rsi_val < 50 else "❌ RSI ≥ 50")
-                    st.write("✅ IV > 50%" if iv > 50 else f"❌ IV {iv}%")
+                    st.write("✅ IV > 50%" if iv > 50 else f"❌ IV {iv:.1f}%")
                     st.write("✅ Red Day" if red_day else "⚪ Not Red Day")
 
-                    st.progress(score / 4.0)
-
-                except Exception as e:
+                except:
                     st.error(f"Error loading {ticker}")
 
 # ====================== TAB 2: SINGLE TICKER ======================
 with tab2:
     if not single_ticker:
-        st.info("Enter ticker in sidebar")
+        st.info("Enter a ticker in the sidebar")
         st.stop()
 
-    st.header(f"Deep Dive → **{single_ticker}**")
+    st.header(f"Deep Dive: **{single_ticker}**")
 
-    if st.button("🔄 Refresh This Ticker", type="primary"):
+    if st.button("🔄 Refresh This Ticker", type="primary", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
 
+    # Fixed cache function - only return serializable objects
     @st.cache_data(ttl=180)
-    def get_data(symbol, days):
+    def get_single_data(symbol, days):
         stock = yf.Ticker(symbol)
         hist = stock.history(period=f"{days}d")
-        return stock, hist, stock.options
+        options_dates = stock.options
+        return hist, options_dates   # Removed full stock object
 
-    stock, hist, options_dates = get_data(single_ticker, days)
+    hist, options_dates = get_single_data(single_ticker, days)
 
     if hist.empty:
-        st.error("No data found.")
+        st.error("No data found for this ticker.")
         st.stop()
 
-    # ... (rest of single ticker calculations and detailed plots - same as previous version)
     close = hist['Close']
     current_price = round(float(close.iloc[-1]), 2)
 
@@ -147,7 +141,9 @@ with tab2:
     iv = 35.0
     try:
         if options_dates:
-            chain = stock.option_chain(options_dates[0])
+            # Fresh Ticker object for options
+            temp_stock = yf.Ticker(single_ticker)
+            chain = temp_stock.option_chain(options_dates[0])
             puts = chain.puts
             if not puts.empty:
                 atm_idx = (puts['strike'] - current_price).abs().idxmin()
@@ -155,26 +151,47 @@ with tab2:
     except:
         pass
 
-    col1, col2 = st.columns([1, 1])
+    # Display
+    col1, col2 = st.columns([1.1, 1])
     with col1:
-        st.subheader("1. EMA Cloud (9 > 21)")
-        st.success("PASS") if is_green_cloud else st.error("FAIL")
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=hist.index[-90:], y=close[-90:], name="Price"))
-        fig.add_trace(go.Scatter(x=hist.index[-90:], y=ema9[-90:], name="EMA9"))
-        fig.add_trace(go.Scatter(x=hist.index[-90:], y=ema21[-90:], name="EMA21"))
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col2:
-        st.subheader("2. RSI < 50")
-        st.success("PASS") if current_rsi < 50 else st.error("FAIL")
+        st.subheader("1. EMA Cloud Green (9>21)")
+        st.success("✅ PASS") if is_green_cloud else st.error("❌ FAIL")
         
+        fig1 = go.Figure()
+        fig1.add_trace(go.Scatter(x=hist.index[-90:], y=close[-90:], name="Price"))
+        fig1.add_trace(go.Scatter(x=hist.index[-90:], y=ema9[-90:], name="EMA 9"))
+        fig1.add_trace(go.Scatter(x=hist.index[-90:], y=ema21[-90:], name="EMA 21"))
+        st.plotly_chart(fig1, use_container_width=True)
+
+        st.subheader("2. RSI < 50")
+        st.success("✅ PASS") if current_rsi < 50 else st.error("❌ FAIL")
         fig2 = go.Figure()
         fig2.add_trace(go.Scatter(x=hist.index[-90:], y=rsi[-90:], name="RSI"))
-        fig2.add_hline(y=50, line_dash="dash")
+        fig2.add_hline(y=50, line_dash="dash", line_color="red")
         st.plotly_chart(fig2, use_container_width=True)
 
-    st.success(f"**Overall Score: {sum([is_green_cloud, current_rsi<50, iv>50, is_red_day])} / 4 Technical Checks**")
+    with col2:
+        st.subheader("Risk Management")
+        account_size = st.number_input("Account Size ($)", value=50000, min_value=10000, step=1000)
+        max_pos = account_size * 0.30
+        position_size = st.number_input("Planned Position Size ($)", value=int(max_pos * 0.75), step=500)
+        
+        st.metric("5. Position ≤ 30%?", 
+                  "✅ PASS" if position_size <= max_pos else "❌ FAIL",
+                  f"Max: ${max_pos:,.0f}")
+
+        credit = st.number_input("Expected Credit per Contract ($)", value=1.25, step=0.05)
+        contracts = st.number_input("Number of Contracts", value=5, min_value=1)
+        
+        premium = credit * 100 * contracts
+        capital = current_price * 100 * contracts
+        est_roi = round((premium / capital) * 100, 1) if capital > 0 else 0
+        
+        st.metric("6. ~5% ROI Target?", 
+                  "✅ PASS" if est_roi >= 5 else "❌ FAIL", 
+                  f"Est. ROI: {est_roi}%")
+
+    total_score = sum([is_green_cloud, current_rsi < 50, iv > 50, is_red_day])
+    st.success(f"**Technical Score: {total_score}/4** | IV: {iv}%")
 
 st.caption("Educational tool only • Not financial advice")
