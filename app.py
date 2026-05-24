@@ -150,11 +150,15 @@ with tab2:
     except:
         pass
 
-    # Layout
+    # === Main Display ===
     col1, col2 = st.columns([1.1, 1])
+
     with col1:
         st.subheader("1. EMA Cloud Green (9 > 21)")
-        st.success("✅ PASS") if is_green_cloud else st.error("❌ FAIL")
+        if is_green_cloud:
+            st.success("✅ PASS")
+        else:
+            st.error("❌ FAIL")
         
         fig1 = go.Figure()
         fig1.add_trace(go.Scatter(x=hist.index[-90:], y=close[-90:], name="Price"))
@@ -163,7 +167,11 @@ with tab2:
         st.plotly_chart(fig1, use_container_width=True)
 
         st.subheader("2. RSI < 50")
-        st.success("✅ PASS") if current_rsi < 50 else st.error("❌ FAIL")
+        if current_rsi < 50:
+            st.success("✅ PASS")
+        else:
+            st.error("❌ FAIL")
+        
         fig2 = go.Figure()
         fig2.add_trace(go.Scatter(x=hist.index[-90:], y=rsi[-90:], name="RSI"))
         fig2.add_hline(y=50, line_dash="dash", line_color="red")
@@ -191,6 +199,6 @@ with tab2:
                   f"Est. ROI: {est_roi}%")
 
     total_score = sum([is_green_cloud, current_rsi < 50, iv > 50, is_red_day])
-    st.success(f"**Technical Score: {total_score}/4** | IV: {iv}%")
+    st.success(f"**Technical Score: {total_score}/4** | IV: {iv}% | Red Day: {'✅' if is_red_day else '⚪'}")
 
 st.caption("Educational tool only • Not financial advice")
