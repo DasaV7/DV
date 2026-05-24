@@ -2,6 +2,7 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import plotly.graph_objects as go
 from datetime import datetime
 
 import appdirs as ad
@@ -23,7 +24,7 @@ st.sidebar.header("Single Ticker Deep Dive")
 single_ticker = st.sidebar.text_input("Ticker Symbol", value="SPY", max_chars=10).upper().strip()
 days = st.sidebar.slider("History (days)", 30, 730, 365)
 
-tab1, tab2 = st.tabs(["📊 Multi-Ticker Overview", "🔍 Single Ticker Deep Dive"])
+tab1, tab2, tab3 = st.tabs(["📊 Multi-Ticker Overview", "🔍 Single Ticker Deep Dive", "🕯️ Candle Analyzer"])
 
 # ====================== TAB 1: MULTI TICKER ======================
 with tab1:
@@ -35,7 +36,7 @@ with tab1:
         st.rerun()
 
     user_tickers = st.multiselect("Add more tickers", 
-                                  ["AAPL", "QQQ", "AMD", "SMCI", "ARM", "AVGO", "META", "COIN"],
+                                  ["AAPL", "QQQ", "AMD", "SMCI", "ARM", "AVGO", "META", "COIN"], 
                                   default=[])
     
     all_tickers = list(dict.fromkeys(weekly_tickers + user_tickers))
@@ -75,7 +76,6 @@ with tab1:
 
                     green_cloud = float(ema9.iloc[-1]) > float(ema21.iloc[-1])
                     red_day = float(close.iloc[-1]) < float(close.iloc[-2]) if len(close) > 1 else False
-
                     score = sum([green_cloud, rsi_val < 50, iv > 50, red_day])
 
                     color = "🟢" if score >= 3 else "🟡" if score == 2 else "🔴"
@@ -93,7 +93,7 @@ with tab1:
                 except:
                     st.error(f"Error loading {ticker}")
 
-# ====================== TAB 2: SINGLE TICKER ======================
+# ====================== TAB 2: SINGLE TICKER DEEP DIVE ======================
 with tab2:
     if not single_ticker:
         st.info("Enter a ticker in the sidebar")
@@ -105,13 +105,12 @@ with tab2:
         st.cache_data.clear()
         st.rerun()
 
-    # Fixed cache function - only return serializable objects
     @st.cache_data(ttl=180)
     def get_single_data(symbol, days):
         stock = yf.Ticker(symbol)
         hist = stock.history(period=f"{days}d")
         options_dates = stock.options
-        return hist, options_dates   # Removed full stock object
+        return hist, options_dates
 
     hist, options_dates = get_single_data(single_ticker, days)
 
@@ -141,7 +140,6 @@ with tab2:
     iv = 35.0
     try:
         if options_dates:
-            # Fresh Ticker object for options
             temp_stock = yf.Ticker(single_ticker)
             chain = temp_stock.option_chain(options_dates[0])
             puts = chain.puts
@@ -151,12 +149,15 @@ with tab2:
     except:
         pass
 
-    # Display
     col1, col2 = st.columns([1.1, 1])
+
     with col1:
-        st.subheader("1. EMA Cloud Green (9>21)")
-        st.success("✅ PASS") if is_green_cloud else st.error("❌ FAIL")
-        
+        st.subheader("1. EMA Cloud Green (9 > 21)")
+        if is_green_cloud:
+            st.success("✅ PASS")
+        else:
+            st.error("❌ FAIL")
+
         fig1 = go.Figure()
         fig1.add_trace(go.Scatter(x=hist.index[-90:], y=close[-90:], name="Price"))
         fig1.add_trace(go.Scatter(x=hist.index[-90:], y=ema9[-90:], name="EMA 9"))
@@ -164,7 +165,11 @@ with tab2:
         st.plotly_chart(fig1, use_container_width=True)
 
         st.subheader("2. RSI < 50")
-        st.success("✅ PASS") if current_rsi < 50 else st.error("❌ FAIL")
+        if current_rsi < 50:
+            st.success("✅ PASS")
+        else:
+            st.error("❌ FAIL")
+
         fig2 = go.Figure()
         fig2.add_trace(go.Scatter(x=hist.index[-90:], y=rsi[-90:], name="RSI"))
         fig2.add_hline(y=50, line_dash="dash", line_color="red")
@@ -192,6 +197,11 @@ with tab2:
                   f"Est. ROI: {est_roi}%")
 
     total_score = sum([is_green_cloud, current_rsi < 50, iv > 50, is_red_day])
-    st.success(f"**Technical Score: {total_score}/4** | IV: {iv}%")
+    st.success(f"**Technical Score: {total_score}/4** | IV: {iv:.1f}% | Red Day: {'✅' if is_red_day else '⚪'}")
+
+# Candle Analyzer Tab (Placeholder for now)
+with tab3:
+    st.header("🕯️ Candle Analyzer - Coming Soon")
+    st.info("Candle pattern analyzer will be added in the next update.")
 
 st.caption("Educational tool only • Not financial advice")
