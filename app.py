@@ -14,23 +14,19 @@ st.set_page_config(page_title="7-Point Checklist", layout="wide")
 st.title("🟢 Market Moves Matt 7-Point Checklist")
 st.markdown("**Cash-Secured Put Selling Checklist**")
 
-# Refresh Button
 if st.button("🔄 Refresh All Data", type="primary", use_container_width=True):
     st.cache_data.clear()
     st.rerun()
 
 ticker_input = st.sidebar.text_input("Ticker Symbol", value="SPY", max_chars=10).upper().strip()
-days = st.sidebar.slider("Historical days", 30, 365, 180)
+days = st.sidebar.slider("Historical days", 30, 730, 365)
 
 if not ticker_input:
     st.stop()
 
-# Use a refresh key to force update when button is clicked
-refresh_key = st.session_state.get("refresh_key", 0)
-
 # =============================================
 @st.cache_data(ttl=300, show_spinner=False)
-def get_market_data(symbol, days, refresh_key):
+def get_market_data(symbol, days, _refresh_key):
     max_retries = 4
     for attempt in range(max_retries):
         try:
@@ -45,7 +41,6 @@ def get_market_data(symbol, days, refresh_key):
             options_dates = stock.options
             info = stock.info
             
-            st.toast(f"✅ Loaded {symbol} successfully", icon="✅")
             return hist, info, options_dates, True
             
         except Exception as e:
@@ -57,24 +52,28 @@ def get_market_data(symbol, days, refresh_key):
                     time.sleep(wait)
                 continue
             else:
-                st.error(f"Error fetching {symbol}: {str(e)}")
+                st.error(f"Error: {str(e)}")
                 break
     return pd.DataFrame(), {}, [], False
 
 # Fetch data
+refresh_key = st.session_state.get("refresh_key", 0)
 with st.spinner(f"Fetching data for **{ticker_input}**..."):
     hist, info, options_dates, success = get_market_data(ticker_input, days, refresh_key)
 
 if not success or hist.empty:
-    st.error("❌ Failed to load data. Try clicking **Refresh** again after 15-30 seconds.")
+    st.error("❌ Failed to load data. Click Refresh after 20-30 seconds.")
     st.stop()
 
-# ====================== CALCULATIONS ======================
 close = hist['Close']
 current_price = round(float(close.iloc[-1]), 2)
 
+# ====================== INDICATORS ======================
+# EMA Clouds
 ema9 = close.ewm(span=9, adjust=False).mean()
 ema21 = close.ewm(span=21, adjust=False).mean()
+ema100 = close.ewm(span=100, adjust=False).mean()
+ema225 = close.ewm(span=225, adjust=False).mean()
 
 def calculate_rsi(data, periods=14):
     delta = data.diff()
@@ -83,7 +82,9 @@ def calculate_rsi(data, periods=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-current_rsi = round(float(calculate_rsi(close).iloc[-1]), 1)
+rsi = calculate_rsi(close)
+current_rsi = round(float(rsi.iloc[-1]), 1)
+
 is_green_cloud = float(ema9.iloc[-1]) > float(ema21.iloc[-1])
 is_red_day = float(close.iloc[-1]) < float(close.iloc[-2]) if len(close) > 1 else False
 
@@ -100,25 +101,45 @@ try:
 except:
     pass
 
-# ====================== UI ======================
+# ====================== DETAILED CHECKLIST ======================
 st.header(f"**{ticker_input}** — ${current_price} | {datetime.now().strftime('%H:%M:%S')}")
 
-col1, col2 = st.columns(2)
+col1, col2 = st.columns([1.1, 1])
 
 with col1:
-    st.subheader("Market Conditions")
-    st.metric("1. EMA Cloud Green?", "✅ PASS" if is_green_cloud else "❌ FAIL")
-    st.metric("2. RSI < 50?", "✅ PASS" if current_rsi < 50 else "❌ FAIL", f"RSI: {current_rsi}")
-    st.metric("3. IV > 50%?", "✅ PASS" if iv > 50 else "❌ FAIL", f"IV: {iv}%")
-    st.metric("4. Red Day?", "✅ PASS" if is_red_day else "❌ FAIL")
+    st.subheader("📊 Detailed Market Conditions")
+    
+    # 1. EMA Cloud
+    st.markdown("**1. EMA Cloud Green?** (9 > 21)")
+    status1 = "✅ **PASS**" if is_green_cloud else "❌ **FAIL**"
+    st.markdown(f"**{status1}** — EMA9: {ema9.iloc[-1]:.2f} | EMA21: {ema21.iloc[-1]:.2f}")
+    fig1 = go.Figure()
+    fig1.add_trace(go.Scatter(x=hist.index[-60:], y=close[-60:], name="Price"))
+    fig1.add_trace(go.Scatter(x=hist.index[-60:], y=ema9[-60:], name="EMA 9"))
+    fig1.add_trace(go.Scatter(x=hist.index[-60:], y=ema21[-60:], name="EMA 21"))
+    st.plotly_chart(fig1, use_container_width=True)
+
+    # 2. RSI
+    st.markdown("**2. RSI Below 50?**")
+    status2 = "✅ **PASS**" if current_rsi < 50 else "❌ **FAIL**"
+    st.markdown(f"**{status2}** — Current RSI: {current_rsi}")
+    fig2 = go.Figure()
+    fig2.add_trace(go.Scatter(x=hist.index[-90:], y=rsi[-90:], name="RSI"))
+    fig2.add_hline(y=50, line_dash="dash", line_color="red")
+    st.plotly_chart(fig2, use_container_width=True)
+
+    # 3. IV
+    st.markdown("**3. Implied Volatility > 50%?**")
+    status3 = "✅ **PASS**" if iv > 50 else "❌ **FAIL**"
+    st.markdown(f"**{status3}** — Approx ATM IV: {iv}%")
 
 with col2:
-    st.subheader("Risk Management")
+    st.subheader("📈 Risk & Setup")
     account_size = st.number_input("Account Size ($)", value=50000, min_value=10000, step=1000)
     max_pos = account_size * 0.30
     position_size = st.number_input("Planned Position Size ($)", value=int(max_pos * 0.75), step=500)
     
-    st.metric("5. Position ≤ 30%?", 
+    st.metric("5. Position ≤ 30% of Account?", 
               "✅ PASS" if position_size <= max_pos else "❌ FAIL",
               f"Max: ${max_pos:,.0f}")
 
@@ -133,20 +154,49 @@ with col2:
               "✅ PASS" if est_roi >= 5 else "❌ FAIL", 
               f"Est. ROI: {est_roi}%")
 
+# TradingView Advanced Chart
+st.subheader("📊 TradingView Chart (Daily) - with EMA 9/21/100/225, RSI & Volume")
+tv_symbol = ticker_input if ":" in ticker_input else f"NASDAQ:{ticker_input}" if ticker_input in ["AAPL","TSLA","NVDA","AMZN","GOOGL","MSFT"] else ticker_input
+
+tradingview_html = f"""
+<div class="tradingview-widget-container" style="height:700px;width:100%">
+  <div id="tradingview_chart"></div>
+  <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+  <script type="text/javascript">
+  new TradingView.widget(
+  {{
+    "width": "100%",
+    "height": "700",
+    "symbol": "{tv_symbol}",
+    "interval": "D",
+    "timezone": "Etc/UTC",
+    "theme": "light",
+    "style": "1",
+    "locale": "en",
+    "toolbar_bg": "#f1f3f6",
+    "enable_publishing": false,
+    "allow_symbol_change": true,
+    "container_id": "tradingview_chart",
+    "studies": ["RSI@tv-basicstudies", "Volume@tv-basicstudies"],
+    "favorites": {{
+      "intervals": ["1D", "1W", "1M"],
+      "chartTypes": ["Candles"]
+    }}
+  }}
+  );
+  </script>
+</div>
+"""
+st.components.v1.html(tradingview_html, height=720)
+
+# Final Verdict
 passed = sum([is_green_cloud, current_rsi < 50, iv > 50, is_red_day, 
               position_size <= max_pos, est_roi >= 5])
 
 st.markdown("---")
 if passed >= 5:
-    st.success(f"🎉 **{passed}/6 CHECKS PASSED** — Good setup!")
+    st.success(f"🎉 **{passed}/6 CHECKS PASSED** — Strong Setup for Cash-Secured Puts!")
 else:
-    st.warning(f"⚠️ Only {passed}/6 checks passed.")
+    st.warning(f"⚠️ Only {passed}/6 checks passed. Wait for better conditions.")
 
-# Chart
-fig = go.Figure()
-fig.add_trace(go.Scatter(x=hist.index, y=close, name="Price"))
-fig.add_trace(go.Scatter(x=hist.index, y=ema9, name="EMA 9"))
-fig.add_trace(go.Scatter(x=hist.index, y=ema21, name="EMA 21"))
-st.plotly_chart(fig, use_container_width=True)
-
-st.caption("Educational tool only • Not financial advice")
+st.caption("Educational tool only • Not financial advice • Data from Yahoo Finance + TradingView")
