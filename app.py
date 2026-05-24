@@ -8,13 +8,13 @@ import time
 import random
 from datetime import datetime
 
-# Fix cache permission on Streamlit Cloud
 ad.user_cache_dir = lambda *args, **kwargs: "/tmp"
 
 st.set_page_config(page_title="7-Point Checklist", layout="wide")
 st.title("🟢 Market Moves Matt 7-Point Checklist")
 st.markdown("**Cash-Secured Put Selling Checklist**")
 
+# Refresh Button
 if st.button("🔄 Refresh All Data", type="primary", use_container_width=True):
     st.cache_data.clear()
     st.rerun()
@@ -25,9 +25,12 @@ days = st.sidebar.slider("Historical days", 30, 365, 180)
 if not ticker_input:
     st.stop()
 
+# Use a refresh key to force update when button is clicked
+refresh_key = st.session_state.get("refresh_key", 0)
+
 # =============================================
-@st.cache_data(ttl=600, show_spinner=False)
-def get_market_data(symbol, days):
+@st.cache_data(ttl=300, show_spinner=False)
+def get_market_data(symbol, days, refresh_key):
     max_retries = 4
     for attempt in range(max_retries):
         try:
@@ -42,7 +45,7 @@ def get_market_data(symbol, days):
             options_dates = stock.options
             info = stock.info
             
-            # Return only serializable data
+            st.toast(f"✅ Loaded {symbol} successfully", icon="✅")
             return hist, info, options_dates, True
             
         except Exception as e:
@@ -50,20 +53,20 @@ def get_market_data(symbol, days):
             if any(x in error_str for x in ["too many requests", "rate", "429"]):
                 wait = (2 ** attempt) + random.uniform(0.5, 2.5)
                 if attempt < max_retries - 1:
-                    st.warning(f"⏳ Rate limited. Retrying in {wait:.1f}s... (Attempt {attempt+1})")
+                    st.warning(f"⏳ Rate limited. Waiting {wait:.1f}s... (Attempt {attempt+1})")
                     time.sleep(wait)
                 continue
             else:
-                st.error(f"Error: {str(e)}")
+                st.error(f"Error fetching {symbol}: {str(e)}")
                 break
     return pd.DataFrame(), {}, [], False
 
 # Fetch data
-with st.spinner("Fetching data from Yahoo Finance..."):
-    hist, info, options_dates, success = get_market_data(ticker_input, days)
+with st.spinner(f"Fetching data for **{ticker_input}**..."):
+    hist, info, options_dates, success = get_market_data(ticker_input, days, refresh_key)
 
 if not success or hist.empty:
-    st.error("❌ Failed to load data after multiple attempts. Please wait 30-60 seconds and click **Refresh**.")
+    st.error("❌ Failed to load data. Try clicking **Refresh** again after 15-30 seconds.")
     st.stop()
 
 # ====================== CALCULATIONS ======================
@@ -84,11 +87,11 @@ current_rsi = round(float(calculate_rsi(close).iloc[-1]), 1)
 is_green_cloud = float(ema9.iloc[-1]) > float(ema21.iloc[-1])
 is_red_day = float(close.iloc[-1]) < float(close.iloc[-2]) if len(close) > 1 else False
 
-# IV from options
+# IV
 iv = 35.0
 try:
     if options_dates:
-        stock = yf.Ticker(ticker_input)  # fresh object for options
+        stock = yf.Ticker(ticker_input)
         chain = stock.option_chain(options_dates[0])
         puts = chain.puts
         if not puts.empty:
@@ -97,25 +100,25 @@ try:
 except:
     pass
 
-# ====================== DISPLAY ======================
+# ====================== UI ======================
 st.header(f"**{ticker_input}** — ${current_price} | {datetime.now().strftime('%H:%M:%S')}")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("1-4 Market Conditions")
+    st.subheader("Market Conditions")
     st.metric("1. EMA Cloud Green?", "✅ PASS" if is_green_cloud else "❌ FAIL")
     st.metric("2. RSI < 50?", "✅ PASS" if current_rsi < 50 else "❌ FAIL", f"RSI: {current_rsi}")
     st.metric("3. IV > 50%?", "✅ PASS" if iv > 50 else "❌ FAIL", f"IV: {iv}%")
     st.metric("4. Red Day?", "✅ PASS" if is_red_day else "❌ FAIL")
 
 with col2:
-    st.subheader("5-6 Risk Management")
+    st.subheader("Risk Management")
     account_size = st.number_input("Account Size ($)", value=50000, min_value=10000, step=1000)
     max_pos = account_size * 0.30
     position_size = st.number_input("Planned Position Size ($)", value=int(max_pos * 0.75), step=500)
     
-    st.metric("5. Position ≤ 30% of Account?", 
+    st.metric("5. Position ≤ 30%?", 
               "✅ PASS" if position_size <= max_pos else "❌ FAIL",
               f"Max: ${max_pos:,.0f}")
 
@@ -130,21 +133,20 @@ with col2:
               "✅ PASS" if est_roi >= 5 else "❌ FAIL", 
               f"Est. ROI: {est_roi}%")
 
-# Final Score
 passed = sum([is_green_cloud, current_rsi < 50, iv > 50, is_red_day, 
               position_size <= max_pos, est_roi >= 5])
 
 st.markdown("---")
 if passed >= 5:
-    st.success(f"🎉 **{passed}/6 CHECKS PASSED** — Good setup for selling puts!")
+    st.success(f"🎉 **{passed}/6 CHECKS PASSED** — Good setup!")
 else:
     st.warning(f"⚠️ Only {passed}/6 checks passed.")
 
-# Charts
+# Chart
 fig = go.Figure()
 fig.add_trace(go.Scatter(x=hist.index, y=close, name="Price"))
 fig.add_trace(go.Scatter(x=hist.index, y=ema9, name="EMA 9"))
 fig.add_trace(go.Scatter(x=hist.index, y=ema21, name="EMA 21"))
 st.plotly_chart(fig, use_container_width=True)
 
-st.caption("Auto retry enabled • Educational tool only • Not financial advice")
+st.caption("Educational tool only • Not financial advice")
